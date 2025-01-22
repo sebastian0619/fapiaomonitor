@@ -21,6 +21,7 @@ import threading
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import secrets
 import hashlib
+import json
 
 app = FastAPI(title="发票处理系统")
 
@@ -35,6 +36,63 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
 security = HTTPBasic()
+
+class ProcessedFilesManager:
+    def __init__(self):
+        self.processed_files_path = "processed_files.json"
+        self.processed_files = self._load_processed_files()
+        
+    def _load_processed_files(self):
+        """加载已处理文件记录"""
+        if os.path.exists(self.processed_files_path):
+            try:
+                with open(self.processed_files_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.error(f"加载处理记录失败: {e}")
+                return {}
+        return {}
+    
+    def _save_processed_files(self):
+        """保存已处理文件记录"""
+        try:
+            with open(self.processed_files_path, 'w', encoding='utf-8') as f:
+                json.dump(self.processed_files, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"保存处理记录失败: {e}")
+    
+    def get_file_hash(self, file_path):
+        """计算文件的SHA256哈希值"""
+        try:
+            sha256_hash = hashlib.sha256()
+            with open(file_path, "rb") as f:
+                for byte_block in iter(lambda: f.read(4096), b""):
+                    sha256_hash.update(byte_block)
+            return sha256_hash.hexdigest()
+        except Exception as e:
+            logging.error(f"计算文件哈希失败 {file_path}: {e}")
+            return None
+    
+    def is_file_processed(self, file_path):
+        """检查文件是否已处理"""
+        file_hash = self.get_file_hash(file_path)
+        if not file_hash:
+            return False
+        return file_hash in self.processed_files
+    
+    def add_processed_file(self, file_path, new_name):
+        """添加处理记录"""
+        file_hash = self.get_file_hash(file_path)
+        if file_hash:
+            self.processed_files[file_hash] = {
+                "original_path": file_path,
+                "new_name": new_name,
+                "processed_time": datetime.now().isoformat()
+            }
+            self._save_processed_files()
+
+# 创建处理记录管理器实例
+processed_files_manager = ProcessedFilesManager()
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
     """验证管理员密码"""
