@@ -1,0 +1,9 @@
+version: '3'
+
+services:
+  invoice-monitor:
+    build: .
+    container_name: invoice-monitor
+    volumes:
+      - ${INVOICE_DIR:-./invoices}:/watch
+    restart: unless-stopped 
