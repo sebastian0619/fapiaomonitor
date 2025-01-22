@@ -66,6 +66,11 @@ class InvoiceHandler(FileSystemEventHandler):
     def update_directory_amount(self, directory):
         """更新目录名以显示总金额"""
         try:
+            # 如果是watch根目录，直接返回
+            watch_dir = config.get("watch_dir", "./watch")
+            if os.path.abspath(directory) == os.path.abspath(watch_dir):
+                return
+
             total_amount = 0
             # 扫描目录下所有PDF和OFD文件
             for file in os.listdir(directory):
@@ -92,10 +97,6 @@ class InvoiceHandler(FileSystemEventHandler):
                 new_path = os.path.join(os.path.dirname(directory), new_dir_name)
                 os.rename(directory, new_path)
                 logging.info(f"更新目录金额: {new_dir_name}")
-                
-                # 更新配置中的watch_dir
-                if directory == config.get("watch_dir"):
-                    config.set("watch_dir", new_path)
                 
         except Exception as e:
             logging.error(f"更新目录金额失败: {e}")
@@ -163,8 +164,11 @@ def start_file_monitor():
     observer.schedule(event_handler, watch_dir, recursive=True)
     observer.start()
     
-    # 启动时计算初始金额
-    event_handler.update_directory_amount(watch_dir)
+    # 启动时计算所有子目录的初始金额
+    for root, dirs, _ in os.walk(watch_dir):
+        for dir_name in dirs:
+            dir_path = os.path.join(root, dir_name)
+            event_handler.update_directory_amount(dir_path)
     
     logging.info(f"开始监控目录: {watch_dir} (包含子目录)")
     return observer
