@@ -37,6 +37,27 @@ templates = Jinja2Templates(directory="templates")
 
 security = HTTPBasic()
 
+def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    """验证管理员密码"""
+    # 从配置文件获取管理员密码的哈希值，如果不存在则使用默认密码 "admin"
+    stored_password_hash = config.get("admin_password_hash", 
+                                    hashlib.sha256("admin".encode()).hexdigest())
+    
+    # 计算提供的密码的哈希值
+    provided_password_hash = hashlib.sha256(credentials.password.encode()).hexdigest()
+    
+    # 验证用户名和密码
+    is_correct_username = secrets.compare_digest(credentials.username, "admin")
+    is_correct_password = secrets.compare_digest(provided_password_hash, stored_password_hash)
+    
+    if not (is_correct_username and is_correct_password):
+        raise HTTPException(
+            status_code=401,
+            detail="用户名或密码错误",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials
+
 class InvoiceHandler(FileSystemEventHandler):
     def __init__(self):
         self.update_timer = None
