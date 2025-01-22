@@ -11,29 +11,20 @@
 </head>
 <body>
     <div id="app" class="container mt-4">
-        <h1 class="mb-4">发票处理系统</h1>
-        
-        <!-- 配置部分 -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>发票处理系统</h1>
+            <a href="/admin" class="btn btn-outline-secondary">系统管理</a>
+        </div>
+
+        <!-- 用户配置部分 -->
         <div class="card mb-4">
-            <div class="card-header">
-                <h5 class="card-title mb-0">系统配置</h5>
-            </div>
-            <div class="card-body">
-                <form @submit.prevent="saveConfig">
-                    <div class="mb-3">
-                        <label class="form-label">监控目录</label>
-                        <input type="text" class="form-control" v-model="config.watch_dir">
-                    </div>
-                    <div class="mb-3 form-check">
-                        <input type="checkbox" class="form-check-input" id="renameWithAmount" v-model="config.rename_with_amount">
-                        <label class="form-check-label" for="renameWithAmount">重命名时包含金额</label>
-                    </div>
-                    <div class="mb-3">
-                        <label class="form-label">UI端口</label>
-                        <input type="number" class="form-control" v-model.number="config.ui_port">
-                    </div>
-                    <button type="submit" class="btn btn-primary">保存配置</button>
-                </form>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">处理选项</h5>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="renameWithAmount" 
+                           v-model="config.rename_with_amount" @change="saveUserConfig">
+                    <label class="form-check-label" for="renameWithAmount">重命名时包含金额</label>
+                </div>
             </div>
         </div>
 
@@ -82,6 +73,7 @@
                             <tr>
                                 <th>原文件名</th>
                                 <th>状态</th>
+                                <th>金额</th>
                                 <th>新文件名</th>
                             </tr>
                         </thead>
@@ -93,9 +85,16 @@
                                         [[ result.success ? '成功' : '失败' ]]
                                     </span>
                                 </td>
+                                <td>[[ result.amount ? '¥' + formatAmount(result.amount) : '-' ]]</td>
                                 <td>[[ result.new_name || (result.error || '未重命名') ]]</td>
                             </tr>
                         </tbody>
+                        <tfoot v-if="totalAmount > 0">
+                            <tr class="table-info">
+                                <td colspan="2"><strong>总金额</strong></td>
+                                <td colspan="2"><strong>¥[[ formatAmount(totalAmount) ]]</strong></td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </div>
             </div>
@@ -116,20 +115,33 @@
                     downloadUrl: null
                 };
             },
+            computed: {
+                totalAmount() {
+                    return this.results
+                        .filter(r => r.success && r.amount)
+                        .reduce((sum, r) => sum + parseFloat(r.amount), 0);
+                }
+            },
             methods: {
-                async saveConfig() {
+                formatAmount(amount) {
+                    return parseFloat(amount).toLocaleString('zh-CN', {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    });
+                },
+                async saveUserConfig() {
                     try {
                         const formData = new FormData();
-                        formData.append('watch_dir', this.config.watch_dir);
                         formData.append('rename_with_amount', this.config.rename_with_amount);
-                        formData.append('ui_port', this.config.ui_port);
 
-                        const response = await axios.post('/config', formData);
-                        if (response.data.success) {
-                            alert('配置已保存');
+                        const response = await axios.post('/user/config', formData);
+                        if (!response.data.success) {
+                            throw new Error(response.data.error);
                         }
                     } catch (error) {
                         alert('保存配置失败: ' + error.message);
+                        // 恢复原值
+                        this.config.rename_with_amount = !this.config.rename_with_amount;
                     }
                 },
                 handleFileSelect(event) {

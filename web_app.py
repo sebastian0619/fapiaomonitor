@@ -14,6 +14,10 @@ from pathlib import Path
 from config_manager import config
 from pdf_processor import process_special_pdf
 from ofd_processor import process_ofd
+import re
+from watchdog.observers import Observer
+from watchdog.events import FileSystemEventHandler
+import threading
 
 app = FastAPI(title="发票处理系统")
 
@@ -26,6 +30,38 @@ os.makedirs("downloads", exist_ok=True)
 # 静态文件和模板配置
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+class InvoiceHandler(FileSystemEventHandler):
+    def on_created(self, event):
+        if event.is_directory:
+            return
+        
+        file_path = event.src_path
+        if file_path.lower().endswith(('.pdf', '.ofd')):
+            try:
+                logging.info(f"检测到新文件: {file_path}")
+                ext = os.path.splitext(file_path)[1].lower()
+                
+                if ext == '.pdf':
+                    process_special_pdf(file_path)
+                elif ext == '.ofd':
+                    process_ofd(file_path, "tmp", False)
+                    
+            except Exception as e:
+                logging.error(f"处理文件失败 {file_path}: {e}")
+
+def start_file_monitor():
+    """启动文件监控"""
+    watch_dir = config.get("watch_dir", "./watch")
+    if not os.path.exists(watch_dir):
+        os.makedirs(watch_dir, exist_ok=True)
+        
+    event_handler = InvoiceHandler()
+    observer = Observer()
+    observer.schedule(event_handler, watch_dir, recursive=False)
+    observer.start()
+    logging.info(f"开始监控目录: {watch_dir}")
+    return observer
 
 # 存储文件上传时间的字典
 file_upload_times = {}
@@ -110,16 +146,34 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 # 处理文件
                 ext = os.path.splitext(file.filename)[1].lower()
                 result = None
+                amount = None
                 if ext == '.pdf':
                     result = process_special_pdf(file_path)
+                    # 从文件名中提取金额（假设文件名中包含金额信息）
+                    if result:
+                        try:
+                            amount_match = re.search(r'_(\d+\.\d{2})\.pdf$', result)
+                            if amount_match:
+                                amount = amount_match.group(1)
+                        except Exception as e:
+                            logging.warning(f"提取金额失败: {e}")
                 elif ext == '.ofd':
                     result = process_ofd(file_path, "tmp", False)
+                    # 从文件名中提取金额（假设文件名中包含金额信息）
+                    if result:
+                        try:
+                            amount_match = re.search(r'_(\d+\.\d{2})\.(pdf|ofd)$', result)
+                            if amount_match:
+                                amount = amount_match.group(1)
+                        except Exception as e:
+                            logging.warning(f"提取金额失败: {e}")
                 
                 file_info = {
                     "filename": file.filename,
                     "success": result is not None,
                     "new_name": os.path.basename(result) if result else None,
-                    "new_path": result if result else None
+                    "new_path": result if result else None,
+                    "amount": amount
                 }
                 
                 results.append(file_info)
@@ -207,10 +261,65 @@ async def update_config(
             content={"success": False, "error": str(e)}
         )
 
+@app.get("/admin", response_class=HTMLResponse)
+async def admin(request: Request):
+    """管理页面"""
+    return templates.TemplateResponse(
+        "admin.html",
+        {
+            "request": request,
+            "config": config.get_all()
+        }
+    )
+
+@app.post("/admin/config")
+async def update_system_config(
+    watch_dir: str = Form(...),
+    ui_port: int = Form(...)
+):
+    """更新系统配置"""
+    try:
+        config.set("watch_dir", watch_dir)
+        config.set("ui_port", ui_port)
+        return {"success": True}
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": str(e)}
+        )
+
+@app.post("/user/config")
+async def update_user_config(
+    rename_with_amount: bool = Form(...)
+):
+    """更新用户配置"""
+    try:
+        config.set("rename_with_amount", rename_with_amount)
+        return {"success": True}
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": str(e)}
+        )
+
 def start_web_server():
     """启动 Web 服务器"""
     port = config.get("ui_port", 8080)
     uvicorn.run(app, host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
-    start_web_server() 
+    # 配置日志
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s'
+    )
+    
+    # 启动文件监控
+    observer = start_file_monitor()
+    
+    try:
+        # 启动Web服务器
+        start_web_server()
+    except KeyboardInterrupt:
+        observer.stop()
+    observer.join() 
