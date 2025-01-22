@@ -66,16 +66,32 @@ class InvoiceHandler(FileSystemEventHandler):
         if file_path.lower().endswith(('.pdf', '.ofd')):
             try:
                 relative_path = os.path.relpath(file_path, config.get("watch_dir", "./watch"))
+                
+                # 检查文件是否已处理
+                if processed_files_manager.is_file_processed(file_path):
+                    logging.info(f"文件已处理过，跳过: {relative_path}")
+                    return
+                
                 logging.info(f"检测到新文件: {relative_path}")
                 ext = os.path.splitext(file_path)[1].lower()
+                result = None
+                
+                # 使用Watch目录的配置
+                config.set("rename_with_amount", config.get("watch_rename_with_amount", False))
                 
                 if ext == '.pdf':
-                    process_special_pdf(file_path)
+                    result = process_special_pdf(file_path)
                 elif ext == '.ofd':
-                    process_ofd(file_path, "tmp", False)
+                    result = process_ofd(file_path, "tmp", False)
+                
+                if result:
+                    processed_files_manager.add_processed_file(file_path, os.path.basename(result))
                     
             except Exception as e:
                 logging.error(f"处理文件失败 {file_path}: {e}")
+            finally:
+                # 恢复原始配置
+                config.set("rename_with_amount", config.get("webui_rename_with_amount", False))
 
 def start_file_monitor():
     """启动文件监控"""
@@ -128,11 +144,14 @@ async def startup_event():
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
     """主页"""
+    # 确保使用Web UI的配置
+    config_data = config.get_all()
+    config_data["rename_with_amount"] = config_data.get("webui_rename_with_amount", False)
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
-            "config": config.get_all()
+            "config": config_data
         }
     )
 
@@ -160,6 +179,9 @@ async def upload_files(files: List[UploadFile] = File(...)):
     processed_files = []
     
     try:
+        # 使用Web UI的配置
+        config.set("rename_with_amount", config.get("webui_rename_with_amount", False))
+        
         for file in files:
             try:
                 # 保存上传的文件
@@ -238,6 +260,9 @@ async def upload_files(files: List[UploadFile] = File(...)):
             status_code=500,
             content={"error": str(e)}
         )
+    finally:
+        # 恢复Watch目录的配置
+        config.set("rename_with_amount", config.get("watch_rename_with_amount", False))
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
@@ -323,13 +348,29 @@ async def update_system_config(
             content={"success": False, "error": str(e)}
         )
 
+@app.post("/admin/watch_config")
+async def update_watch_config(
+    credentials: HTTPBasicCredentials = Depends(verify_admin),
+    watch_rename_with_amount: bool = Form(...)
+):
+    """更新Watch目录配置"""
+    try:
+        config.set("watch_rename_with_amount", watch_rename_with_amount)
+        return {"success": True}
+    except Exception as e:
+        return JSONResponse(
+            status_code=400,
+            content={"success": False, "error": str(e)}
+        )
+
 @app.post("/user/config")
 async def update_user_config(
     rename_with_amount: bool = Form(...)
 ):
-    """更新用户配置"""
+    """更新Web UI用户配置"""
     try:
-        config.set("rename_with_amount", rename_with_amount)
+        # 将Web UI的重命名配置保存为单独的键
+        config.set("webui_rename_with_amount", rename_with_amount)
         return {"success": True}
     except Exception as e:
         return JSONResponse(

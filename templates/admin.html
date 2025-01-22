@@ -17,7 +17,7 @@
         </div>
         
         <!-- 系统配置 -->
-        <div class="card">
+        <div class="card mb-4">
             <div class="card-header">
                 <h5 class="card-title mb-0">系统配置</h5>
             </div>
@@ -43,6 +43,26 @@
             </div>
         </div>
 
+        <!-- Watch目录配置 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Watch目录配置</h5>
+            </div>
+            <div class="card-body">
+                <form @submit.prevent="saveWatchConfig">
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="watchRenameWithAmount" 
+                               v-model="config.watch_rename_with_amount">
+                        <label class="form-check-label" for="watchRenameWithAmount">
+                            Watch目录文件重命名时包含金额
+                        </label>
+                        <div class="form-text">此设置仅影响Watch目录中的文件处理</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">保存Watch配置</button>
+                </form>
+            </div>
+        </div>
+
         <!-- 系统状态 -->
         <div class="card mt-4">
             <div class="card-header">
@@ -53,6 +73,7 @@
                     <div class="col-md-6">
                         <p><strong>监控状态：</strong> <span class="text-success">运行中</span></p>
                         <p><strong>当前监控目录：</strong> [[ config.watch_dir ]]</p>
+                        <p><strong>Watch目录重命名带金额：</strong> [[ config.watch_rename_with_amount ? '是' : '否' ]]</p>
                     </div>
                     <div class="col-md-6">
                         <p><strong>Web服务端口：</strong> [[ config.ui_port ]]</p>
@@ -81,7 +102,6 @@
                         formData.append('watch_dir', this.config.watch_dir);
                         formData.append('ui_port', this.config.ui_port);
                         
-                        // 如果输入了新密码，则添加到表单
                         if (this.newPassword.trim()) {
                             formData.append('admin_password', this.newPassword);
                         }
@@ -89,10 +109,23 @@
                         const response = await axios.post('/admin/config', formData);
                         if (response.data.success) {
                             alert('系统配置已保存' + (this.newPassword ? '（包含新密码）' : ''));
-                            this.newPassword = ''; // 清空密码输入
+                            this.newPassword = '';
                         }
                     } catch (error) {
                         alert('保存配置失败: ' + error.message);
+                    }
+                },
+                async saveWatchConfig() {
+                    try {
+                        const formData = new FormData();
+                        formData.append('watch_rename_with_amount', this.config.watch_rename_with_amount);
+
+                        const response = await axios.post('/admin/watch_config', formData);
+                        if (response.data.success) {
+                            alert('Watch目录配置已保存');
+                        }
+                    } catch (error) {
+                        alert('保存Watch配置失败: ' + error.message);
                     }
                 }
             }
