@@ -26,7 +26,7 @@ def process_ofd(file_path, tmp_dir, keep_temp_files=False):
                     invoice_number, amount = extract_information(qrcode_data)
                     
                     if invoice_number:
-                        # 创建新文件名
+                        # 创建新文件名（即使没有金额也继续处理）
                         new_file_name = create_new_filename(invoice_number, amount, file_path)
                         new_file_path = os.path.join(os.path.dirname(file_path), new_file_name)
                         

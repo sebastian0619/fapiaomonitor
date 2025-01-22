@@ -34,6 +34,7 @@ def create_new_filename(invoice_number, amount=None, original_path=None):
     """根据配置创建新文件名"""
     ext = os.path.splitext(original_path)[1] if original_path else '.pdf'
     
+    # 检查是否需要包含金额
     if config.get('rename_with_amount', True) and amount:
         return f"[¥{amount}]{invoice_number}{ext}"
     return f"{invoice_number}{ext}"
@@ -51,26 +52,20 @@ def process_special_pdf(file_path):
         invoice_number_match = re.findall(r"(?<!-\d)\b\d{20}\b|(?<!-\d)\b\d{8}\b", text)
         if not invoice_number_match:
             logging.debug("未找到发票号码")
-            return
+            return None
         invoice_number = invoice_number_match[0]
         logging.debug(f"找到发票号码: {invoice_number}")
         
         # 提取金额
-        amount_match = re.findall(r"¥\s*(\d+\.\d+)", text)
-        if not amount_match:
-            logging.debug("未找到金额")
-            if config.get('rename_with_amount', True):
-                return  # 如果配置要求包含金额但未找到金额，则不重命名
-        
-        # 使用最大金额
         amount_str = None
+        amount_match = re.findall(r"¥\s*(\d+\.\d+)", text)
         if amount_match:
-            amounts = map(float, amount_match)
+            amounts = list(map(float, amount_match))
             max_amount = max(amounts)
             amount_str = "{:.2f}".format(max_amount)
             logging.debug(f"找到最大金额: {amount_str}")
         
-        # 创建新文件名
+        # 创建新文件名（即使没有找到金额也继续处理）
         new_file_name = create_new_filename(invoice_number, amount_str, file_path)
         new_file_path = os.path.join(os.path.dirname(file_path), new_file_name)
         

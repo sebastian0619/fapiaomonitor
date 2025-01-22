@@ -1,5 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, Form, Request
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import FastAPI, UploadFile, File, Form, Request, BackgroundTasks
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
@@ -7,7 +7,10 @@ import os
 import logging
 from typing import List
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
+import zipfile
+import asyncio
+from pathlib import Path
 from config_manager import config
 from pdf_processor import process_special_pdf
 from ofd_processor import process_ofd
@@ -18,10 +21,46 @@ app = FastAPI(title="发票处理系统")
 os.makedirs("static", exist_ok=True)
 os.makedirs("templates", exist_ok=True)
 os.makedirs("uploads", exist_ok=True)
+os.makedirs("downloads", exist_ok=True)
 
 # 静态文件和模板配置
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
+
+# 存储文件上传时间的字典
+file_upload_times = {}
+
+async def cleanup_old_files():
+    """定期清理超过30分钟的上传文件"""
+    while True:
+        try:
+            current_time = datetime.now()
+            # 检查并删除过期文件
+            expired_files = []
+            for file_path, upload_time in file_upload_times.items():
+                if current_time - upload_time > timedelta(minutes=30):
+                    if os.path.exists(file_path):
+                        try:
+                            os.remove(file_path)
+                            logging.info(f"已删除过期文件: {file_path}")
+                        except Exception as e:
+                            logging.error(f"删除文件失败 {file_path}: {e}")
+                    expired_files.append(file_path)
+            
+            # 从记录中移除已删除的文件
+            for file_path in expired_files:
+                file_upload_times.pop(file_path, None)
+                
+        except Exception as e:
+            logging.error(f"清理文件时发生错误: {e}")
+        
+        # 每分钟检查一次
+        await asyncio.sleep(60)
+
+@app.on_event("startup")
+async def startup_event():
+    """启动时开始运行清理任务"""
+    asyncio.create_task(cleanup_old_files())
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
@@ -34,41 +73,116 @@ async def home(request: Request):
         }
     )
 
+def create_zip_file(files_info):
+    """创建包含处理后文件的ZIP包"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    zip_filename = f"processed_invoices_{timestamp}.zip"
+    zip_path = os.path.join("downloads", zip_filename)
+    
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for info in files_info:
+            if info["success"] and info.get("new_path"):
+                # 将文件添加到ZIP中，使用新文件名作为ZIP中的名称
+                zipf.write(
+                    info["new_path"],
+                    os.path.basename(info["new_path"])
+                )
+    
+    return zip_path
+
 @app.post("/upload")
 async def upload_files(files: List[UploadFile] = File(...)):
-    """处理上传的文件"""
+    """处理上传的文件并返回ZIP包下载链接"""
     results = []
-    for file in files:
-        try:
-            # 保存上传的文件
-            file_path = os.path.join("uploads", file.filename)
-            with open(file_path, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
-            
-            # 处理文件
-            ext = os.path.splitext(file.filename)[1].lower()
-            if ext == '.pdf':
-                result = process_special_pdf(file_path)
-            elif ext == '.ofd':
-                result = process_ofd(file_path, "tmp", False)
-            else:
-                result = None
-                
-            results.append({
-                "filename": file.filename,
-                "success": result is not None,
-                "new_name": os.path.basename(result) if result else None
-            })
-            
-        except Exception as e:
-            logging.error(f"处理文件失败 {file.filename}: {e}")
-            results.append({
-                "filename": file.filename,
-                "success": False,
-                "error": str(e)
-            })
+    processed_files = []
     
-    return JSONResponse(content={"results": results})
+    try:
+        for file in files:
+            try:
+                # 保存上传的文件
+                file_path = os.path.join("uploads", file.filename)
+                with open(file_path, "wb") as buffer:
+                    shutil.copyfileobj(file.file, buffer)
+                
+                # 记录文件上传时间
+                file_upload_times[file_path] = datetime.now()
+                
+                # 处理文件
+                ext = os.path.splitext(file.filename)[1].lower()
+                result = None
+                if ext == '.pdf':
+                    result = process_special_pdf(file_path)
+                elif ext == '.ofd':
+                    result = process_ofd(file_path, "tmp", False)
+                
+                file_info = {
+                    "filename": file.filename,
+                    "success": result is not None,
+                    "new_name": os.path.basename(result) if result else None,
+                    "new_path": result if result else None
+                }
+                
+                results.append(file_info)
+                if result:
+                    processed_files.append(file_info)
+                
+            except Exception as e:
+                logging.error(f"处理文件失败 {file.filename}: {e}")
+                results.append({
+                    "filename": file.filename,
+                    "success": False,
+                    "error": str(e)
+                })
+        
+        # 如果有成功处理的文件，创建ZIP包
+        zip_path = None
+        if processed_files:
+            zip_path = create_zip_file(processed_files)
+            # 清理已处理的原始文件
+            for file_info in processed_files:
+                if file_info.get("new_path") and os.path.exists(file_info["new_path"]):
+                    try:
+                        os.remove(file_info["new_path"])
+                    except Exception as e:
+                        logging.error(f"清理文件失败 {file_info['new_path']}: {e}")
+        
+        return JSONResponse(content={
+            "results": results,
+            "download_url": f"/download/{os.path.basename(zip_path)}" if zip_path else None
+        })
+        
+    except Exception as e:
+        logging.error(f"批量处理文件失败: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+@app.get("/download/{filename}")
+async def download_file(filename: str):
+    """下载处理后的ZIP文件"""
+    file_path = os.path.join("downloads", filename)
+    if not os.path.exists(file_path):
+        return JSONResponse(
+            status_code=404,
+            content={"error": "文件不存在"}
+        )
+    
+    response = FileResponse(
+        file_path,
+        media_type="application/zip",
+        filename=filename
+    )
+    
+    # 设置回调以在发送完成后删除文件
+    async def delete_file():
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            logging.error(f"删除ZIP文件失败 {file_path}: {e}")
+    
+    response.background = delete_file
+    return response
 
 @app.get("/config")
 async def get_config():
