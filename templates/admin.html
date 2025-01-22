@@ -33,6 +33,11 @@
                         <input type="number" class="form-control" v-model.number="config.ui_port">
                         <div class="form-text">Web界面服务端口号（需要重启服务生效）</div>
                     </div>
+                    <div class="mb-3">
+                        <label class="form-label">管理员密码</label>
+                        <input type="password" class="form-control" v-model="newPassword" placeholder="留空表示不修改密码">
+                        <div class="form-text">设置新的管理员密码（默认用户名：admin）</div>
+                    </div>
                     <button type="submit" class="btn btn-primary">保存系统配置</button>
                 </form>
             </div>
@@ -65,7 +70,8 @@
             delimiters: ['[[', ']]'],
             data() {
                 return {
-                    config: JSON.parse('{{ config | tojson | safe }}')
+                    config: JSON.parse('{{ config | tojson | safe }}'),
+                    newPassword: ''
                 };
             },
             methods: {
@@ -74,11 +80,16 @@
                         const formData = new FormData();
                         formData.append('watch_dir', this.config.watch_dir);
                         formData.append('ui_port', this.config.ui_port);
-                        formData.append('rename_with_amount', this.config.rename_with_amount);
+                        
+                        // 如果输入了新密码，则添加到表单
+                        if (this.newPassword.trim()) {
+                            formData.append('admin_password', this.newPassword);
+                        }
 
                         const response = await axios.post('/admin/config', formData);
                         if (response.data.success) {
-                            alert('系统配置已保存');
+                            alert('系统配置已保存' + (this.newPassword ? '（包含新密码）' : ''));
+                            this.newPassword = ''; // 清空密码输入
                         }
                     } catch (error) {
                         alert('保存配置失败: ' + error.message);

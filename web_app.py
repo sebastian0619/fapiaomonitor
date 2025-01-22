@@ -1,5 +1,5 @@
-from fastapi import FastAPI, UploadFile, File, Form, Request, BackgroundTasks
-from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+from fastapi import FastAPI, UploadFile, File, Form, Request, BackgroundTasks, HTTPException, Depends
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import uvicorn
@@ -18,6 +18,9 @@ import re
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 import threading
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+import secrets
+import hashlib
 
 app = FastAPI(title="发票处理系统")
 
@@ -31,6 +34,29 @@ os.makedirs("downloads", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
 
+security = HTTPBasic()
+
+def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
+    """验证管理员密码"""
+    # 从配置文件获取管理员密码的哈希值，如果不存在则使用默认密码 "admin"
+    stored_password_hash = config.get("admin_password_hash", 
+                                    hashlib.sha256("admin".encode()).hexdigest())
+    
+    # 计算提供的密码的哈希值
+    provided_password_hash = hashlib.sha256(credentials.password.encode()).hexdigest()
+    
+    # 验证用户名和密码
+    is_correct_username = secrets.compare_digest(credentials.username, "admin")
+    is_correct_password = secrets.compare_digest(provided_password_hash, stored_password_hash)
+    
+    if not (is_correct_username and is_correct_password):
+        raise HTTPException(
+            status_code=401,
+            detail="用户名或密码错误",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials
+
 class InvoiceHandler(FileSystemEventHandler):
     def on_created(self, event):
         if event.is_directory:
@@ -39,7 +65,8 @@ class InvoiceHandler(FileSystemEventHandler):
         file_path = event.src_path
         if file_path.lower().endswith(('.pdf', '.ofd')):
             try:
-                logging.info(f"检测到新文件: {file_path}")
+                relative_path = os.path.relpath(file_path, config.get("watch_dir", "./watch"))
+                logging.info(f"检测到新文件: {relative_path}")
                 ext = os.path.splitext(file_path)[1].lower()
                 
                 if ext == '.pdf':
@@ -58,9 +85,9 @@ def start_file_monitor():
         
     event_handler = InvoiceHandler()
     observer = Observer()
-    observer.schedule(event_handler, watch_dir, recursive=False)
+    observer.schedule(event_handler, watch_dir, recursive=True)
     observer.start()
-    logging.info(f"开始监控目录: {watch_dir}")
+    logging.info(f"开始监控目录: {watch_dir} (包含子目录)")
     return observer
 
 # 存储文件上传时间的字典
@@ -262,8 +289,8 @@ async def update_config(
         )
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin(request: Request):
-    """管理页面"""
+async def admin(request: Request, credentials: HTTPBasicCredentials = Depends(verify_admin)):
+    """管理页面（需要密码验证）"""
     return templates.TemplateResponse(
         "admin.html",
         {
@@ -274,13 +301,21 @@ async def admin(request: Request):
 
 @app.post("/admin/config")
 async def update_system_config(
+    credentials: HTTPBasicCredentials = Depends(verify_admin),
     watch_dir: str = Form(...),
-    ui_port: int = Form(...)
+    ui_port: int = Form(...),
+    admin_password: str = Form(None)  # 可选参数，用于更新管理员密码
 ):
-    """更新系统配置"""
+    """更新系统配置（需要密码验证）"""
     try:
         config.set("watch_dir", watch_dir)
         config.set("ui_port", ui_port)
+        
+        # 如果提供了新密码，则更新密码哈希
+        if admin_password:
+            new_password_hash = hashlib.sha256(admin_password.encode()).hexdigest()
+            config.set("admin_password_hash", new_password_hash)
+            
         return {"success": True}
     except Exception as e:
         return JSONResponse(
