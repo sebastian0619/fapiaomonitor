@@ -37,84 +37,6 @@ templates = Jinja2Templates(directory="templates")
 
 security = HTTPBasic()
 
-class ProcessedFilesManager:
-    def __init__(self):
-        self.processed_files_path = "processed_files.json"
-        self.processed_files = self._load_processed_files()
-        
-    def _load_processed_files(self):
-        """加载已处理文件记录"""
-        if os.path.exists(self.processed_files_path):
-            try:
-                with open(self.processed_files_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-            except Exception as e:
-                logging.error(f"加载处理记录失败: {e}")
-                return {}
-        return {}
-    
-    def _save_processed_files(self):
-        """保存已处理文件记录"""
-        try:
-            with open(self.processed_files_path, 'w', encoding='utf-8') as f:
-                json.dump(self.processed_files, f, ensure_ascii=False, indent=2)
-        except Exception as e:
-            logging.error(f"保存处理记录失败: {e}")
-    
-    def get_file_hash(self, file_path):
-        """计算文件的SHA256哈希值"""
-        try:
-            sha256_hash = hashlib.sha256()
-            with open(file_path, "rb") as f:
-                for byte_block in iter(lambda: f.read(4096), b""):
-                    sha256_hash.update(byte_block)
-            return sha256_hash.hexdigest()
-        except Exception as e:
-            logging.error(f"计算文件哈希失败 {file_path}: {e}")
-            return None
-    
-    def is_file_processed(self, file_path):
-        """检查文件是否已处理"""
-        file_hash = self.get_file_hash(file_path)
-        if not file_hash:
-            return False
-        return file_hash in self.processed_files
-    
-    def add_processed_file(self, file_path, new_name):
-        """添加处理记录"""
-        file_hash = self.get_file_hash(file_path)
-        if file_hash:
-            self.processed_files[file_hash] = {
-                "original_path": file_path,
-                "new_name": new_name,
-                "processed_time": datetime.now().isoformat()
-            }
-            self._save_processed_files()
-
-# 创建处理记录管理器实例
-processed_files_manager = ProcessedFilesManager()
-
-def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
-    """验证管理员密码"""
-    # 从配置文件获取管理员密码的哈希值，如果不存在则使用默认密码 "admin"
-    stored_password_hash = config.get("admin_password_hash", 
-                                    hashlib.sha256("admin".encode()).hexdigest())
-    
-    # 计算提供的密码的哈希值
-    provided_password_hash = hashlib.sha256(credentials.password.encode()).hexdigest()
-    
-    # 验证用户名和密码
-    is_correct_username = secrets.compare_digest(credentials.username, "admin")
-    is_correct_password = secrets.compare_digest(provided_password_hash, stored_password_hash)
-    
-    if not (is_correct_username and is_correct_password):
-        raise HTTPException(
-            status_code=401,
-            detail="用户名或密码错误",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials
-
 class InvoiceHandler(FileSystemEventHandler):
     def __init__(self):
         self.update_timer = None
@@ -174,13 +96,8 @@ class InvoiceHandler(FileSystemEventHandler):
         if file_path.lower().endswith(('.pdf', '.ofd')):
             try:
                 relative_path = os.path.relpath(file_path, config.get("watch_dir", "./watch"))
-                
-                # 检查文件是否已处理
-                if processed_files_manager.is_file_processed(file_path):
-                    logging.info(f"文件已处理过，跳过: {relative_path}")
-                    return
-                
                 logging.info(f"检测到新文件: {relative_path}")
+                
                 ext = os.path.splitext(file_path)[1].lower()
                 result = None
                 
@@ -193,7 +110,6 @@ class InvoiceHandler(FileSystemEventHandler):
                     result = process_ofd(file_path, "tmp", False)
                 
                 if result:
-                    processed_files_manager.add_processed_file(file_path, os.path.basename(result))
                     # 调度目录金额更新
                     self.schedule_update(os.path.dirname(file_path))
                     
@@ -315,7 +231,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(file.file, buffer)
                 
-                # 记录文件上传时间
+                # 记录文件上传时间（用于自动清理）
                 file_upload_times[file_path] = datetime.now()
                 
                 # 处理文件
@@ -324,7 +240,6 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 amount = None
                 if ext == '.pdf':
                     result = process_special_pdf(file_path)
-                    # 从文件名中提取金额（假设文件名中包含金额信息）
                     if result:
                         try:
                             amount_match = re.search(r'_(\d+\.\d{2})\.pdf$', result)
@@ -334,7 +249,6 @@ async def upload_files(files: List[UploadFile] = File(...)):
                             logging.warning(f"提取金额失败: {e}")
                 elif ext == '.ofd':
                     result = process_ofd(file_path, "tmp", False)
-                    # 从文件名中提取金额（假设文件名中包含金额信息）
                     if result:
                         try:
                             amount_match = re.search(r'_(\d+\.\d{2})\.(pdf|ofd)$', result)
