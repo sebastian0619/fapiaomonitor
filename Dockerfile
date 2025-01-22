@@ -22,15 +22,21 @@ RUN cargo install --locked --force qrscan
 # 复制项目文件
 COPY requirements.txt .
 COPY *.py .
+COPY templates templates/
+COPY static static/
+
+# 创建必要的目录
+RUN mkdir -p /watch /app/uploads /app/tmp /app/static
 
 # 安装 Python 依赖
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 创建监控目录
-RUN mkdir -p /watch
-
 # 设置环境变量
 ENV WATCH_DIR=/watch
+ENV PYTHONUNBUFFERED=1
 
-# 运行监控程序
-CMD ["python", "monitor.py"] 
+# 暴露端口
+EXPOSE 8080
+
+# 运行 Web 服务器
+CMD ["python", "web_app.py"] 

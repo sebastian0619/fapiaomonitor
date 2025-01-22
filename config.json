@@ -1,0 +1,8 @@
+{
+    "watch_dir": "./watch",
+    "rename_with_amount": true,
+    "ui_port": 8080,
+    "log_level": "INFO",
+    "temp_dir": "./tmp",
+    "supported_formats": [".pdf", ".ofd"]
+} 

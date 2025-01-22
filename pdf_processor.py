@@ -3,57 +3,88 @@ import os
 import uuid
 import logging
 import re
+from config_manager import config
 
 def convert_to_image(file_path, output_dir, pages=None):
+    """将PDF文件转换为图片"""
     try:
-        logging.debug(f"Converting file to image: {file_path}")
+        logging.debug(f"正在转换PDF为图片: {file_path}")
         doc = fitz.open(file_path)
         image_paths = []
         # 如果未指定pages，则处理所有页面
         pages_to_process = pages if pages is not None else range(len(doc))
         for page_num in pages_to_process:
-            logging.debug(f"Processing page number: {page_num}")
+            logging.debug(f"处理页面: {page_num}")
             page = doc.load_page(page_num)
             pix = page.get_pixmap(dpi=300)
             output = os.path.join(output_dir, f"{uuid.uuid4()}.png")
             pix.save(output)
             image_paths.append(output)
-            logging.debug(f"Saved image: {output}")
+            logging.debug(f"已保存图片: {output}")
             if pages is not None:
                 # 如果指定了页面，假设我们只关心这些特定页面
                 break
         doc.close()
         return image_paths
     except Exception as e:
-        logging.debug(f"Error in convert_to_image: {e}")
+        logging.error(f"转换PDF为图片时出错: {e}")
+        return []
+
+def create_new_filename(invoice_number, amount=None, original_path=None):
+    """根据配置创建新文件名"""
+    ext = os.path.splitext(original_path)[1] if original_path else '.pdf'
+    
+    if config.get('rename_with_amount', True) and amount:
+        return f"[¥{amount}]{invoice_number}{ext}"
+    return f"{invoice_number}{ext}"
 
 def process_special_pdf(file_path):
+    """处理特殊PDF文件（无法从二维码获取信息时）"""
     try:
-        logging.debug(f"Processing special PDF: {file_path}")
+        logging.debug(f"处理特殊PDF文件: {file_path}")
         text = ""
         with fitz.open(file_path) as doc:
             for page in doc:
                 text += page.get_text()
         
+        # 提取发票号码
         invoice_number_match = re.findall(r"(?<!-\d)\b\d{20}\b|(?<!-\d)\b\d{8}\b", text)
-        if invoice_number_match:
-            invoice_number = invoice_number_match[0]
-            logging.debug(f"Found invoice number: {invoice_number}")
-        else:
+        if not invoice_number_match:
+            logging.debug("未找到发票号码")
             return
+        invoice_number = invoice_number_match[0]
+        logging.debug(f"找到发票号码: {invoice_number}")
         
+        # 提取金额
         amount_match = re.findall(r"¥\s*(\d+\.\d+)", text)
+        if not amount_match:
+            logging.debug("未找到金额")
+            if config.get('rename_with_amount', True):
+                return  # 如果配置要求包含金额但未找到金额，则不重命名
+        
+        # 使用最大金额
+        amount_str = None
         if amount_match:
             amounts = map(float, amount_match)
             max_amount = max(amounts)
-            max_amount_str = "{:.2f}".format(max_amount)
-            logging.debug(f"Found max amount: {max_amount_str}")
-        else:
-            return
+            amount_str = "{:.2f}".format(max_amount)
+            logging.debug(f"找到最大金额: {amount_str}")
         
-        new_file_name = f"[¥{max_amount_str}]{invoice_number}"
-        new_file_path = os.path.join(os.path.dirname(file_path), f"{new_file_name}{os.path.splitext(file_path)[1]}")
+        # 创建新文件名
+        new_file_name = create_new_filename(invoice_number, amount_str, file_path)
+        new_file_path = os.path.join(os.path.dirname(file_path), new_file_name)
+        
+        # 处理文件名冲突
+        counter = 1
+        while os.path.exists(new_file_path):
+            base_name = os.path.splitext(new_file_name)[0]
+            ext = os.path.splitext(new_file_name)[1]
+            new_file_path = os.path.join(os.path.dirname(file_path), f"{base_name}_{counter}{ext}")
+            counter += 1
+        
         os.rename(file_path, new_file_path)
-        logging.debug(f"Renamed file to: {new_file_path}")
+        logging.info(f"文件重命名为: {new_file_path}")
+        return new_file_path
     except Exception as e:
-        logging.debug(f"Error in process_special_pdf: {e}")
+        logging.error(f"处理PDF文件时出错: {e}")
+        return None

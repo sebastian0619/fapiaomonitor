@@ -2,4 +2,9 @@ watchdog==3.0.0
 pyzbar==0.1.9
 pillow==10.2.0
 PyMuPDF==1.23.8
-requests==2.31.0 
+requests==2.31.0
+fastapi==0.109.0
+uvicorn==0.27.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+jinja2==3.1.3 
