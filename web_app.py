@@ -58,6 +58,56 @@ def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
     return credentials
 
 class InvoiceHandler(FileSystemEventHandler):
+    def __init__(self):
+        self.update_timer = None
+        super().__init__()
+    
+    def update_directory_amount(self, directory):
+        """更新目录名以显示总金额"""
+        try:
+            total_amount = 0
+            # 扫描目录下所有PDF和OFD文件
+            for file in os.listdir(directory):
+                if file.lower().endswith(('.pdf', '.ofd')):
+                    file_path = os.path.join(directory, file)
+                    try:
+                        # 从文件名中提取金额
+                        amount_match = re.search(r'_(\d+\.\d{2})\.(pdf|ofd)$', file)
+                        if amount_match:
+                            total_amount += float(amount_match.group(1))
+                    except Exception as e:
+                        logging.warning(f"提取文件金额失败 {file}: {e}")
+            
+            # 获取目录的基本名称（不包含金额部分）
+            dir_name = os.path.basename(directory)
+            # 使用 -￥ 作为分隔符来分割目录名
+            base_dir_name = re.sub(r'-￥\d+\.\d{2}$', '', dir_name)
+            
+            # 构造新的目录名，使用 -￥ 作为分隔符
+            new_dir_name = f"{base_dir_name}-￥{total_amount:.2f}"
+            
+            # 如果目录名不同，则重命名
+            if dir_name != new_dir_name:
+                new_path = os.path.join(os.path.dirname(directory), new_dir_name)
+                os.rename(directory, new_path)
+                logging.info(f"更新目录金额: {new_dir_name}")
+                
+                # 更新配置中的watch_dir
+                if directory == config.get("watch_dir"):
+                    config.set("watch_dir", new_path)
+                
+        except Exception as e:
+            logging.error(f"更新目录金额失败: {e}")
+    
+    def schedule_update(self, directory):
+        """调度目录更新（带防抖动）"""
+        if self.update_timer:
+            self.update_timer.cancel()
+        
+        # 创建新的定时器，1秒后执行更新（减少延迟时间）
+        self.update_timer = threading.Timer(1.0, self.update_directory_amount, args=[directory])
+        self.update_timer.start()
+    
     def on_created(self, event):
         if event.is_directory:
             return
@@ -86,12 +136,26 @@ class InvoiceHandler(FileSystemEventHandler):
                 
                 if result:
                     processed_files_manager.add_processed_file(file_path, os.path.basename(result))
+                    # 调度目录金额更新
+                    self.schedule_update(os.path.dirname(file_path))
                     
             except Exception as e:
                 logging.error(f"处理文件失败 {file_path}: {e}")
             finally:
                 # 恢复原始配置
                 config.set("rename_with_amount", config.get("webui_rename_with_amount", False))
+    
+    def on_deleted(self, event):
+        """文件删除时更新目录金额"""
+        if not event.is_directory and event.src_path.lower().endswith(('.pdf', '.ofd')):
+            self.schedule_update(os.path.dirname(event.src_path))
+    
+    def on_moved(self, event):
+        """文件移动时更新源目录和目标目录的金额"""
+        if not event.is_directory and event.src_path.lower().endswith(('.pdf', '.ofd')):
+            self.schedule_update(os.path.dirname(event.src_path))
+            if os.path.dirname(event.src_path) != os.path.dirname(event.dest_path):
+                self.schedule_update(os.path.dirname(event.dest_path))
 
 def start_file_monitor():
     """启动文件监控"""
@@ -103,6 +167,10 @@ def start_file_monitor():
     observer = Observer()
     observer.schedule(event_handler, watch_dir, recursive=True)
     observer.start()
+    
+    # 启动时计算初始金额
+    event_handler.update_directory_amount(watch_dir)
+    
     logging.info(f"开始监控目录: {watch_dir} (包含子目录)")
     return observer
 
