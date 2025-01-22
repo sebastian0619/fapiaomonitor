@@ -19,14 +19,14 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # 通过 Cargo 安装 qrscan
 RUN cargo install --locked --force qrscan
 
+# 创建必要的目录
+RUN mkdir -p /watch /app/uploads /app/tmp /app/static /app/templates
+
 # 复制项目文件
 COPY requirements.txt .
 COPY *.py .
-COPY templates templates/
-COPY static static/
-
-# 创建必要的目录
-RUN mkdir -p /watch /app/uploads /app/tmp /app/static
+COPY static/* static/
+COPY templates/* templates/
 
 # 安装 Python 依赖
 RUN pip install --no-cache-dir -r requirements.txt

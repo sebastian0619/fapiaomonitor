@@ -5,21 +5,25 @@ services:
     build: .
     container_name: invoice-monitor
     volumes:
-      # 监控目录映射
-      - ${WATCH_DIR:-./watch}:/watch
-      # 上传目录映射
-      - ${UPLOAD_DIR:-./uploads}:/app/uploads
+      # 监控目录映射（放置需要自动处理的发票）
+      - ./watch:/watch
+      # 上传目录映射（Web UI上传的文件）
+      - ./uploads:/app/uploads
       # 临时文件目录映射
-      - ${TEMP_DIR:-./tmp}:/app/tmp
-      # 配置文件映射
-      - ${CONFIG_FILE:-./config.json}:/app/config.json
+      - ./tmp:/app/tmp
+      # 配置文件映射（可选）
+      - ./config.json:/app/config.json:ro
     ports:
-      # Web UI 端口映射
-      - "${UI_PORT:-8080}:8080"
+      # Web UI 端口映射（可修改为其他端口）
+      - "8080:8080"
     environment:
-      # 环境变量配置
+      # 基本配置
       - WATCH_DIR=/watch
       - LOG_LEVEL=INFO
+      # UI配置（可选）
+      - UI_PORT=8080
+      # 重命名配置（可选）
+      - RENAME_WITH_AMOUNT=true
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080"]

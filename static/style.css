@@ -1,0 +1,28 @@
+/* 自定义样式 */
+.upload-area {
+    border: 2px dashed #ccc;
+    border-radius: 5px;
+    padding: 20px;
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+.upload-area:hover {
+    border-color: #666;
+}
+
+.result-table {
+    margin-top: 20px;
+}
+
+.config-form label {
+    font-weight: 500;
+}
+
+.status-success {
+    color: #28a745;
+}
+
+.status-error {
+    color: #dc3545;
+} 
