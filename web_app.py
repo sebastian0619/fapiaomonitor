@@ -95,11 +95,28 @@ class InvoiceHandler(FileSystemEventHandler):
             # 如果目录名不同，则重命名
             if dir_name != new_dir_name:
                 new_path = os.path.join(os.path.dirname(directory), new_dir_name)
-                os.rename(directory, new_path)
-                logging.info(f"更新目录金额: {new_dir_name}")
+                try:
+                    # 使用shutil.move代替os.rename
+                    shutil.move(directory, new_path)
+                    logging.info(f"更新目录金额: {new_dir_name}")
+                except Exception as e:
+                    logging.error(f"重命名目录失败: {e}")
+                    logging.error(f"源目录: {directory}")
+                    logging.error(f"目标目录: {new_path}")
+                    # 如果失败，尝试使用临时目录名
+                    try:
+                        temp_path = os.path.join(os.path.dirname(directory), f"{base_dir_name}_temp")
+                        shutil.move(directory, temp_path)
+                        shutil.move(temp_path, new_path)
+                        logging.info(f"使用临时目录成功更新金额: {new_dir_name}")
+                    except Exception as e2:
+                        logging.error(f"使用临时目录重命名也失败: {e2}")
                 
         except Exception as e:
             logging.error(f"更新目录金额失败: {e}")
+            logging.error(f"目录: {directory}")
+            logging.error(f"错误类型: {type(e).__name__}")
+            logging.error(f"错误详情: {str(e)}")
     
     def schedule_update(self, directory):
         """调度目录更新（带防抖动）"""
