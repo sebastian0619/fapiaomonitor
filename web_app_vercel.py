@@ -15,8 +15,9 @@ import secrets
 import hashlib
 import json
 import fitz  # PyMuPDF
+import cv2
+import numpy as np
 from PIL import Image
-from pyzbar.pyzbar import decode
 
 app = FastAPI(title="发票处理系统")
 
@@ -49,12 +50,25 @@ class Config:
 config = Config()
 
 def scan_qrcode(image_path):
-    """扫描图片中的二维码"""
+    """使用OpenCV扫描图片中的二维码"""
     try:
-        image = Image.open(image_path)
-        decoded_objects = decode(image)
-        if decoded_objects:
-            return decoded_objects[0].data.decode('utf-8')
+        # 读取图片
+        image = cv2.imread(image_path)
+        if image is None:
+            return None
+            
+        # 创建QR码检测器
+        qr_detector = cv2.QRCodeDetector()
+        
+        # 检测和解码QR码
+        retval, decoded_info, points, straight_qrcode = qr_detector.detectAndDecodeMulti(image)
+        
+        if retval and decoded_info:
+            # 返回第一个检测到的QR码内容
+            for info in decoded_info:
+                if info:  # 确保内容不为空
+                    return info
+        
         return None
     except Exception as e:
         logging.error(f"扫描二维码失败: {e}")
