@@ -14,6 +14,9 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 import secrets
 import hashlib
 import json
+import fitz  # PyMuPDF
+from PIL import Image
+from pyzbar.pyzbar import decode
 
 app = FastAPI(title="发票处理系统")
 
@@ -44,6 +47,91 @@ class Config:
         return self.config.copy()
 
 config = Config()
+
+def scan_qrcode(image_path):
+    """扫描图片中的二维码"""
+    try:
+        image = Image.open(image_path)
+        decoded_objects = decode(image)
+        if decoded_objects:
+            return decoded_objects[0].data.decode('utf-8')
+        return None
+    except Exception as e:
+        logging.error(f"扫描二维码失败: {e}")
+        return None
+
+def extract_information(data_str):
+    """从二维码数据中提取发票号码和金额"""
+    invoice_number = None
+    amount = None
+    
+    try:
+        # 提取发票号码（支持20位和8位格式）
+        invoice_match = re.search(r"\b\d{20}\b|\b\d{8}\b", data_str)
+        if invoice_match:
+            invoice_number = invoice_match.group(0)
+        
+        # 提取金额
+        amount_patterns = [
+            r"(\d+\.\d+)(?=,)",
+            r"金额[:：]\s*(\d+\.\d+)",
+            r"¥\s*(\d+\.\d+)",
+            r"[^\d](\d+\.\d+)[^\d]"
+        ]
+        
+        for pattern in amount_patterns:
+            amount_match = re.search(pattern, data_str)
+            if amount_match:
+                amount = "{:.2f}".format(float(amount_match.group(1)))
+                break
+    except Exception as e:
+        logging.error(f"提取信息失败: {e}")
+    
+    return invoice_number, amount
+
+def process_pdf(file_path):
+    """处理PDF文件"""
+    try:
+        # 转换第一页为图片
+        doc = fitz.open(file_path)
+        page = doc[0]
+        pix = page.get_pixmap(dpi=300)
+        image_path = f"{file_path}_page0.png"
+        pix.save(image_path)
+        
+        # 扫描二维码
+        qr_data = scan_qrcode(image_path)
+        
+        # 清理临时文件
+        os.remove(image_path)
+        doc.close()
+        
+        if qr_data:
+            invoice_number, amount = extract_information(qr_data)
+            if not amount:  # 如果二维码中没有金额，尝试从文本中提取
+                text = ""
+                with fitz.open(file_path) as doc:
+                    for page in doc:
+                        text += page.get_text()
+                amount_match = re.search(r"¥\s*(\d+\.\d+)", text)
+                if amount_match:
+                    amount = "{:.2f}".format(float(amount_match.group(1)))
+            
+            if invoice_number:
+                # 创建新文件名
+                new_name = invoice_number
+                if amount and config.get("webui_rename_with_amount"):
+                    new_name = f"{invoice_number}_{amount}"
+                new_name += ".pdf"
+                
+                # 在临时目录中创建新文件
+                new_path = os.path.join("/tmp", new_name)
+                shutil.copy2(file_path, new_path)
+                return new_path, amount
+    except Exception as e:
+        logging.error(f"处理PDF文件失败: {e}")
+    
+    return None, None
 
 def verify_admin(credentials: HTTPBasicCredentials = Depends(security)):
     """验证管理员密码"""
@@ -104,19 +192,27 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(file.file, buffer)
                 
-                # 处理文件（这里需要实现具体的处理逻辑）
-                # TODO: 实现文件处理逻辑
+                # 处理文件
+                new_path = None
+                amount = None
+                
+                if file.filename.lower().endswith('.pdf'):
+                    new_path, amount = process_pdf(file_path)
                 
                 file_info = {
                     "filename": file.filename,
-                    "success": True,  # 这里需要根据实际处理结果设置
-                    "new_name": file.filename,  # 这里需要根据实际处理结果设置
-                    "new_path": file_path,
-                    "amount": "0.00"  # 这里需要根据实际处理结果设置
+                    "success": new_path is not None,
+                    "new_name": os.path.basename(new_path) if new_path else None,
+                    "new_path": new_path,
+                    "amount": amount
                 }
                 
                 results.append(file_info)
-                processed_files.append(file_info)
+                if new_path:
+                    processed_files.append(file_info)
+                
+                # 清理原始上传文件
+                os.remove(file_path)
                 
             except Exception as e:
                 logging.error(f"处理文件失败 {file.filename}: {e}")
@@ -130,6 +226,10 @@ async def upload_files(files: List[UploadFile] = File(...)):
         zip_path = None
         if processed_files:
             zip_path = create_zip_file(processed_files)
+            # 清理处理后的文件
+            for file_info in processed_files:
+                if file_info.get("new_path") and os.path.exists(file_info["new_path"]):
+                    os.remove(file_info["new_path"])
         
         return JSONResponse(content={
             "results": results,
