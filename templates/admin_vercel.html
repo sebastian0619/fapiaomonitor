@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>发票处理系统 - 系统管理</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.3.0/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <link href="/static/style.css" rel="stylesheet">
+</head>
+<body>
+    <div id="app" class="container mt-4">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>系统管理</h1>
+            <a href="/" class="btn btn-outline-primary">返回主页</a>
+        </div>
+        
+        <!-- 系统配置 -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">系统配置</h5>
+            </div>
+            <div class="card-body">
+                <form @submit.prevent="saveConfig">
+                    <div class="mb-3">
+                        <label class="form-label">管理员密码</label>
+                        <input type="password" class="form-control" v-model="newPassword" placeholder="留空表示不修改密码">
+                        <div class="form-text">设置新的管理员密码（默认用户名：admin）</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">保存系统配置</button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 系统状态 -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">系统状态</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Web UI重命名带金额：</strong> [[ config.webui_rename_with_amount ? '是' : '否' ]]</p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>版本：</strong> 1.0.0 (Vercel)</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const { createApp } = Vue;
+
+        createApp({
+            delimiters: ['[[', ']]'],
+            data() {
+                return {
+                    config: JSON.parse('{{ config | tojson | safe }}'),
+                    newPassword: ''
+                };
+            },
+            methods: {
+                async saveConfig() {
+                    try {
+                        const formData = new FormData();
+                        if (this.newPassword.trim()) {
+                            formData.append('admin_password', this.newPassword);
+                        }
+
+                        const response = await axios.post('/admin/config', formData);
+                        if (response.data.success) {
+                            alert('系统配置已保存' + (this.newPassword ? '（包含新密码）' : ''));
+                            this.newPassword = '';
+                        }
+                    } catch (error) {
+                        alert('保存配置失败: ' + error.message);
+                    }
+                }
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html> 
