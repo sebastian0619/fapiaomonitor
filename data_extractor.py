@@ -3,11 +3,8 @@ import re
 import fitz  # PyMuPDF, 用于读取PDF文件
 from pyzbar.pyzbar import decode
 import logging
-import subprocess
-import json
-import shutil
 
-def scan_qrcode_with_pyzbar(image_path):
+def scan_qrcode(image_path):
     """
     使用 pyzbar 扫描二维码
     """
@@ -16,58 +13,12 @@ def scan_qrcode_with_pyzbar(image_path):
         decoded_objects = decode(image)
         if decoded_objects:
             qr_data = decoded_objects[0].data.decode('utf-8')
-            logging.debug(f"pyzbar 成功识别二维码: {qr_data}")
+            logging.debug(f"成功识别二维码: {qr_data}")
             return qr_data
         return None
     except Exception as e:
-        logging.debug(f"pyzbar 扫描出错: {e}")
+        logging.debug(f"扫描二维码失败: {e}")
         return None
-
-def scan_qrcode_with_qrscan(image_path):
-    """
-    使用 qrscan 扫描二维码
-    """
-    try:
-        # 检查 qrscan 是否在系统路径中
-        qrscan_path = shutil.which('qrscan')
-        if not qrscan_path:
-            logging.debug("未找到 qrscan，跳过")
-            return None
-
-        result = subprocess.run(['qrscan', image_path], 
-                              capture_output=True, 
-                              text=True,
-                              check=True)
-        
-        output = result.stdout.strip()
-        if output:
-            logging.debug(f"qrscan 成功识别二维码: {output}")
-            return output
-        return None
-    except subprocess.CalledProcessError as e:
-        logging.debug(f"qrscan 执行失败: {e}")
-        return None
-    except Exception as e:
-        logging.debug(f"qrscan 扫描出错: {e}")
-        return None
-
-def scan_qrcode(image_path):
-    """
-    使用 pyzbar 和 qrscan 扫描二维码，互为备选
-    """
-    # 首先尝试使用 pyzbar
-    result = scan_qrcode_with_pyzbar(image_path)
-    if result:
-        return result
-        
-    # 如果 pyzbar 失败，尝试使用 qrscan
-    logging.debug("pyzbar 未识别到二维码，尝试使用 qrscan")
-    result = scan_qrcode_with_qrscan(image_path)
-    if result:
-        return result
-    
-    logging.error("所有二维码识别方法均失败")
-    return None
 
 def extract_information(data_str):
     """

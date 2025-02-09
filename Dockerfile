@@ -8,16 +8,7 @@ RUN apt-get update && apt-get install -y \
     poppler-utils \
     libzbar0 \
     curl \
-    build-essential \
-    libclang-dev \
     && rm -rf /var/lib/apt/lists/*
-
-# 安装 Rust 和 Cargo
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
-
-# 通过 Cargo 安装 qrscan
-RUN cargo install --locked --force qrscan
 
 # 创建必要的目录
 RUN mkdir -p /watch /app/uploads /app/tmp /app/static /app/templates
