@@ -193,7 +193,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
                     result = process_special_pdf(file_path)
                     if result:
                         try:
-                            amount_match = re.search(r'_(\d+\.\d{2})\.pdf$', result)
+                            amount_match = re.search(r'\[¥(\d+\.\d{2})\]', os.path.basename(result))
                             if amount_match:
                                 amount = amount_match.group(1)
                         except Exception as e:
@@ -202,58 +202,48 @@ async def upload_files(files: List[UploadFile] = File(...)):
                     result = process_ofd(file_path, "tmp", False)
                     if result:
                         try:
-                            amount_match = re.search(r'_(\d+\.\d{2})\.(pdf|ofd)$', result)
+                            amount_match = re.search(r'\[¥(\d+\.\d{2})\]', os.path.basename(result))
                             if amount_match:
                                 amount = amount_match.group(1)
                         except Exception as e:
                             logging.warning(f"提取金额失败: {e}")
                 
-                file_info = {
+                # 准备结果
+                success = result is not None
+                new_name = os.path.basename(result) if success else None
+                results.append({
                     "filename": file.filename,
-                    "success": result is not None,
-                    "new_name": os.path.basename(result) if result else None,
-                    "new_path": result if result else None,
-                    "amount": amount
-                }
+                    "success": success,
+                    "amount": amount,
+                    "new_name": new_name,
+                    "new_path": result if success else None
+                })
                 
-                results.append(file_info)
-                if result:
-                    processed_files.append(file_info)
+                if success:
+                    processed_files.append(result)
                 
             except Exception as e:
-                logging.error(f"处理文件失败 {file.filename}: {e}")
+                logging.error(f"处理文件失败: {e}")
                 results.append({
                     "filename": file.filename,
                     "success": False,
                     "error": str(e)
                 })
+                continue
         
-        # 如果有成功处理的文件，创建ZIP包
-        zip_path = None
+        # 创建ZIP文件（如果有成功处理的文件）
         if processed_files:
-            zip_path = create_zip_file(processed_files)
-            # 清理已处理的原始文件
-            for file_info in processed_files:
-                if file_info.get("new_path") and os.path.exists(file_info["new_path"]):
-                    try:
-                        os.remove(file_info["new_path"])
-                    except Exception as e:
-                        logging.error(f"清理文件失败 {file_info['new_path']}: {e}")
+            zip_path = create_zip_file([r for r in results if r["success"]])
+            return {"success": True, "results": results, "download": zip_path}
         
-        return JSONResponse(content={
-            "results": results,
-            "download_url": f"/download/{os.path.basename(zip_path)}" if zip_path else None
-        })
-        
+        return {"success": True, "results": results}
+    
     except Exception as e:
-        logging.error(f"批量处理文件失败: {e}")
-        return JSONResponse(
-            status_code=500,
-            content={"error": str(e)}
-        )
+        logging.error(f"处理上传文件时出错: {e}")
+        return {"success": False, "error": str(e)}
     finally:
-        # 恢复Watch目录的配置
-        config.set("rename_with_amount", config.get("watch_rename_with_amount", False))
+        # 恢复原始配置
+        config.set("rename_with_amount", config.get("webui_rename_with_amount", False))
 
 @app.get("/download/{filename}")
 async def download_file(filename: str):
