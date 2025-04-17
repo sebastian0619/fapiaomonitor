@@ -234,7 +234,8 @@ async def upload_files(files: List[UploadFile] = File(...)):
         # 创建ZIP文件（如果有成功处理的文件）
         if processed_files:
             zip_path = create_zip_file([r for r in results if r["success"]])
-            return {"success": True, "results": results, "download": zip_path}
+            download_url = f"/download/{os.path.basename(zip_path)}"
+            return {"success": True, "results": results, "download_url": download_url}
         
         return {"success": True, "results": results}
     
