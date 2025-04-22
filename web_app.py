@@ -103,7 +103,7 @@ def start_file_monitor():
 file_upload_times = {}
 
 async def cleanup_old_files():
-    """定期清理超过30分钟的上传文件"""
+    """定期清理超过30分钟的上传文件和处理后的文件"""
     while True:
         try:
             current_time = datetime.now()
@@ -122,6 +122,22 @@ async def cleanup_old_files():
             # 从记录中移除已删除的文件
             for file_path in expired_files:
                 file_upload_times.pop(file_path, None)
+            
+            # 清理处理后的文件
+            watch_dir = config.get("watch_dir", "./watch")
+            if os.path.exists(watch_dir):
+                for filename in os.listdir(watch_dir):
+                    if filename.startswith("[¥") and os.path.isfile(os.path.join(watch_dir, filename)):
+                        file_path = os.path.join(watch_dir, filename)
+                        file_stat = os.stat(file_path)
+                        file_age = current_time - datetime.fromtimestamp(file_stat.st_mtime)
+                        # 删除超过1小时的处理后文件
+                        if file_age > timedelta(hours=1):
+                            try:
+                                os.remove(file_path)
+                                logging.info(f"已删除过期处理后文件: {file_path}")
+                            except Exception as e:
+                                logging.error(f"删除文件失败 {file_path}: {e}")
                 
         except Exception as e:
             logging.error(f"清理文件时发生错误: {e}")
@@ -359,6 +375,62 @@ async def update_user_config(
             status_code=400,
             content={"success": False, "error": str(e)}
         )
+
+@app.post("/clear-cache")
+async def clear_cache():
+    """清理缓存文件"""
+    try:
+        # 清理上传目录
+        cleared_files = []
+        for filename in os.listdir("uploads"):
+            file_path = os.path.join("uploads", filename)
+            if os.path.isfile(file_path):
+                try:
+                    os.remove(file_path)
+                    cleared_files.append(file_path)
+                    # 从记录中移除
+                    file_upload_times.pop(file_path, None)
+                except Exception as e:
+                    logging.error(f"删除文件失败 {file_path}: {e}")
+        
+        # 清理临时目录
+        if os.path.exists("tmp"):
+            for filename in os.listdir("tmp"):
+                file_path = os.path.join("tmp", filename)
+                if os.path.isfile(file_path):
+                    try:
+                        os.remove(file_path)
+                        cleared_files.append(file_path)
+                    except Exception as e:
+                        logging.error(f"删除文件失败 {file_path}: {e}")
+        
+        # 清理下载目录
+        for filename in os.listdir("downloads"):
+            file_path = os.path.join("downloads", filename)
+            if os.path.isfile(file_path):
+                try:
+                    os.remove(file_path)
+                    cleared_files.append(file_path)
+                except Exception as e:
+                    logging.error(f"删除文件失败 {file_path}: {e}")
+        
+        # 清理处理后的文件（如果用户确认）
+        watch_dir = config.get("watch_dir", "./watch")
+        if os.path.exists(watch_dir):
+            for filename in os.listdir(watch_dir):
+                # 只删除带金额标记的已处理文件
+                if filename.startswith("[¥") and os.path.isfile(os.path.join(watch_dir, filename)):
+                    file_path = os.path.join(watch_dir, filename)
+                    try:
+                        os.remove(file_path)
+                        cleared_files.append(file_path)
+                    except Exception as e:
+                        logging.error(f"删除文件失败 {file_path}: {e}")
+        
+        return {"success": True, "message": f"成功清理 {len(cleared_files)} 个缓存文件"}
+    except Exception as e:
+        logging.error(f"清理缓存失败: {e}")
+        return {"success": False, "error": str(e)}
 
 def start_web_server():
     """启动 Web 服务器"""
